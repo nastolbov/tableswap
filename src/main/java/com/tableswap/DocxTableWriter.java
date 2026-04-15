@@ -37,6 +37,10 @@ public final class DocxTableWriter {
 
     public static void write(MarkdownTable table, OutputStream out) throws IOException {
         try (XWPFDocument doc = new XWPFDocument()) {
+            if (table.caption() != null && !table.caption().isBlank()) {
+                writeCaption(doc, table.caption());
+            }
+
             XWPFTable xTable = doc.createTable(
                     table.rows().size() + 1,
                     table.columnCount());
@@ -68,6 +72,21 @@ public final class DocxTableWriter {
 
             doc.write(out);
         }
+    }
+
+    private static void writeCaption(XWPFDocument doc, String caption) {
+        XWPFParagraph paragraph = doc.createParagraph();
+        paragraph.setAlignment(ParagraphAlignment.LEFT);
+        paragraph.setSpacingLineRule(LineSpacingRule.AUTO);
+        paragraph.setSpacingBetween(1.5, LineSpacingRule.AUTO);
+        paragraph.setSpacingBefore(0);
+        paragraph.setSpacingAfter(0);
+
+        XWPFRun run = paragraph.createRun();
+        run.setFontFamily(FONT_FAMILY);
+        run.setFontSize(FONT_SIZE);
+        run.setBold(true);
+        run.setText(caption);
     }
 
     private static void applyDefaultLayout(XWPFTable table) {

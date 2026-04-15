@@ -19,6 +19,11 @@ public final class CellClassifier {
             "^[+\\-]?\\d{1,3}(?:[ \\u00A0]\\d{3})*(?:[.,]\\d+)?\\s?%?$"
             + "|^[+\\-]?\\d+(?:[.,]\\d+)?\\s?%?$");
 
+    // 12343 мс ; 42 kg ; 3,5 ч ; 1 200 руб. ; 98°
+    private static final Pattern NUMBER_WITH_UNIT = Pattern.compile(
+            "^[+\\-]?\\d{1,3}(?:[ \\u00A0]\\d{3})*(?:[.,]\\d+)?\\s*[\\p{L}°][\\p{L}.]{0,5}$"
+            + "|^[+\\-]?\\d+(?:[.,]\\d+)?\\s*[\\p{L}°][\\p{L}.]{0,5}$");
+
     // 2024-01-31, 31.01.2024, 31/01/2024, 31-01-2024, 2024/01/31
     private static final Pattern DATE_NUMERIC = Pattern.compile(
             "^\\d{4}[./-]\\d{1,2}[./-]\\d{1,2}$"
@@ -39,7 +44,7 @@ public final class CellClassifier {
         if (v.isEmpty()) {
             return CellType.TEXT;
         }
-        if (NUMBER.matcher(v).matches()) {
+        if (NUMBER.matcher(v).matches() || NUMBER_WITH_UNIT.matcher(v).matches()) {
             return CellType.NUMBER;
         }
         if (DATE_NUMERIC.matcher(v).matches() || DATE_RU_WORD.matcher(v).matches()) {
