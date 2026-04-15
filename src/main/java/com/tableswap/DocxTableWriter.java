@@ -16,9 +16,13 @@ import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTBorder;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTbl;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblBorders;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblGrid;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblLayoutType;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblPr;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblWidth;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTcPr;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STBorder;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblLayoutType;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
 
 /**
@@ -31,6 +35,12 @@ public final class DocxTableWriter {
 
     private static final String FONT_FAMILY = "Times New Roman";
     private static final int FONT_SIZE = 12;
+
+    /**
+     * Полезная ширина страницы в твипах (A4, поля 2.5 см): 21 см − 2 × 2.5 см ≈ 16 см.
+     * 1 см ≈ 567 твипов, 16 см ≈ 9072 твипа. Берём с запасом для равномерного деления.
+     */
+    private static final int USABLE_PAGE_WIDTH_TWIPS = 9000;
 
     private DocxTableWriter() {
     }
@@ -45,14 +55,17 @@ public final class DocxTableWriter {
                     table.rows().size() + 1,
                     table.columnCount());
 
-            applyDefaultLayout(xTable);
+            int cols = table.columnCount();
+            int colWidth = USABLE_PAGE_WIDTH_TWIPS / Math.max(cols, 1);
+            applyDefaultLayout(xTable, cols, colWidth);
 
             // Заголовок
             XWPFTableRow headerRow = xTable.getRow(0);
             List<String> header = table.header();
             for (int c = 0; c < header.size(); c++) {
-                fillCell(headerRow.getCell(c), header.get(c),
-                        ParagraphAlignment.CENTER, true);
+                XWPFTableCell cell = headerRow.getCell(c);
+                setCellWidth(cell, colWidth);
+                fillCell(cell, header.get(c), ParagraphAlignment.CENTER, true);
             }
 
             // Данные
@@ -66,7 +79,9 @@ public final class DocxTableWriter {
                         case NUMBER, DATE -> ParagraphAlignment.RIGHT;
                         case TEXT -> ParagraphAlignment.BOTH;
                     };
-                    fillCell(row.getCell(c), value, align, false);
+                    XWPFTableCell cell = row.getCell(c);
+                    setCellWidth(cell, colWidth);
+                    fillCell(cell, value, align, false);
                 }
             }
 
@@ -89,14 +104,40 @@ public final class DocxTableWriter {
         run.setText(caption);
     }
 
-    private static void applyDefaultLayout(XWPFTable table) {
+    private static void applyDefaultLayout(XWPFTable table, int columnCount, int colWidth) {
         CTTbl ctTbl = table.getCTTbl();
         CTTblPr tblPr = ctTbl.getTblPr() != null ? ctTbl.getTblPr() : ctTbl.addNewTblPr();
 
-        // Ширина таблицы — 100% страницы.
+        // Фиксируем ширину таблицы в твипах (100% полезной ширины A4 с полями 2.5 см).
+        // С явной шириной Word не «съедет» влево за поле и не начнёт перекрывать колонки.
         CTTblWidth width = tblPr.isSetTblW() ? tblPr.getTblW() : tblPr.addNewTblW();
-        width.setType(STTblWidth.PCT);
-        width.setW(BigInteger.valueOf(5000)); // 5000 = 100%
+        width.setType(STTblWidth.DXA);
+        width.setW(BigInteger.valueOf((long) colWidth * columnCount));
+
+        // Нулевой отступ слева: таблица встаёт впритык к левому полю страницы.
+        CTTblWidth indent = tblPr.isSetTblInd() ? tblPr.getTblInd() : tblPr.addNewTblInd();
+        indent.setType(STTblWidth.DXA);
+        indent.setW(BigInteger.ZERO);
+
+        // Автоподгонка: Word сам будет сжимать/тянуть колонки под содержимое,
+        // чтобы длинный текст не «смешивался» в соседние ячейки.
+        CTTblLayoutType layout = tblPr.isSetTblLayout() ? tblPr.getTblLayout() : tblPr.addNewTblLayout();
+        layout.setType(STTblLayoutType.AUTOFIT);
+
+        // Сетка колонок (tblGrid) обязательна для корректного рендеринга в Word:
+        // без неё Word угадывает ширины и часто промахивается.
+        // tblGrid в CTTbl — обязательный элемент, поэтому всегда существует;
+        // на всякий случай проверяем на null и создаём, если POI его не положил.
+        CTTblGrid grid = ctTbl.getTblGrid();
+        if (grid == null) {
+            grid = ctTbl.addNewTblGrid();
+        }
+        while (grid.sizeOfGridColArray() > 0) {
+            grid.removeGridCol(0);
+        }
+        for (int i = 0; i < columnCount; i++) {
+            grid.addNewGridCol().setW(BigInteger.valueOf(colWidth));
+        }
 
         // Стандартные тонкие чёрные бордюры.
         CTTblBorders borders = tblPr.isSetTblBorders() ? tblPr.getTblBorders() : tblPr.addNewTblBorders();
@@ -106,6 +147,15 @@ public final class DocxTableWriter {
         setBorder(borders.isSetRight() ? borders.getRight() : borders.addNewRight());
         setBorder(borders.isSetInsideH() ? borders.getInsideH() : borders.addNewInsideH());
         setBorder(borders.isSetInsideV() ? borders.getInsideV() : borders.addNewInsideV());
+    }
+
+    private static void setCellWidth(XWPFTableCell cell, int widthTwips) {
+        CTTcPr tcPr = cell.getCTTc().getTcPr() != null
+                ? cell.getCTTc().getTcPr()
+                : cell.getCTTc().addNewTcPr();
+        CTTblWidth tcW = tcPr.isSetTcW() ? tcPr.getTcW() : tcPr.addNewTcW();
+        tcW.setType(STTblWidth.DXA);
+        tcW.setW(BigInteger.valueOf(widthTwips));
     }
 
     private static void setBorder(CTBorder border) {
