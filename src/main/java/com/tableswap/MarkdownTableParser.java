@@ -115,7 +115,8 @@ public final class MarkdownTableParser {
         }
         for (String part : parts) {
             String p = part.strip();
-            if (p.isEmpty() || !p.matches(":?-{3,}:?")) {
+            // Разрешаем 1+ дефиса (GFM принимает и короткие разделители вроде :-:).
+            if (p.isEmpty() || !p.matches(":?-+:?")) {
                 return false;
             }
         }
@@ -139,14 +140,39 @@ public final class MarkdownTableParser {
                 current.append('|');
                 i++;
             } else if (c == '|') {
-                cells.add(current.toString().strip());
+                cells.add(cleanupCell(current.toString()));
                 current.setLength(0);
             } else {
                 current.append(c);
             }
         }
-        cells.add(current.toString().strip());
+        cells.add(cleanupCell(current.toString()));
         return Arrays.asList(cells.toArray(new String[0]));
+    }
+
+    /**
+     * Приводит ячейку Markdown в «человеческий» вид: снимает инлайн-код
+     * в обратных кавычках, звёздочки жирного/курсива, подчёркивания
+     * и разворачивает {@code <br>} в перевод строки.
+     */
+    private static String cleanupCell(String raw) {
+        String s = raw.strip();
+        if (s.isEmpty()) {
+            return s;
+        }
+        // <br>, <br/>, <br /> → перевод строки
+        s = s.replaceAll("(?i)<br\\s*/?>", "\n");
+        // `code` → code (оставляем содержимое)
+        s = s.replaceAll("`([^`]*)`", "$1");
+        // **bold**, __bold__
+        s = s.replaceAll("\\*\\*(.+?)\\*\\*", "$1");
+        s = s.replaceAll("__(.+?)__", "$1");
+        // *italic*, _italic_  (но не посреди слова, где _ часть идентификатора)
+        s = s.replaceAll("(?<![\\p{L}\\d])\\*([^*\\n]+?)\\*(?![\\p{L}\\d])", "$1");
+        s = s.replaceAll("(?<![\\p{L}\\d])_([^_\\n]+?)_(?![\\p{L}\\d])", "$1");
+        // [текст](url) → текст
+        s = s.replaceAll("\\[([^\\]]+)\\]\\([^\\)]+\\)", "$1");
+        return s.strip();
     }
 
     // --- TSV -------------------------------------------------------------

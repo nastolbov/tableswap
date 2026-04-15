@@ -4,6 +4,8 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -69,11 +71,15 @@ public final class App extends JFrame {
         JButton convertBtn = new JButton("Сохранить как .docx…");
         convertBtn.addActionListener(e -> convert());
 
+        JButton copyBtn = new JButton("Скопировать в Word (буфер)");
+        copyBtn.addActionListener(e -> copyToClipboard());
+
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
         buttons.add(openBtn);
         buttons.add(pasteBtn);
         buttons.add(clearBtn);
         buttons.add(convertBtn);
+        buttons.add(copyBtn);
 
         setLayout(new BorderLayout());
         add(buttons, BorderLayout.NORTH);
@@ -134,6 +140,36 @@ public final class App extends JFrame {
                         + "\nКолонок: " + table.columnCount()
                         + ", строк данных: " + table.rows().size(),
                 "Успех", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void copyToClipboard() {
+        String source = inputArea.getText();
+        MarkdownTable table;
+        try {
+            table = MarkdownTableParser.parse(source);
+        } catch (RuntimeException ex) {
+            showError(ex.getMessage());
+            return;
+        }
+
+        String html = HtmlTableWriter.toHtml(table);
+        String plain = HtmlTableWriter.toPlainText(table);
+
+        try {
+            Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+            clipboard.setContents(new HtmlSelection(html, plain), null);
+        } catch (IllegalStateException ex) {
+            showError("Системный буфер обмена занят. Попробуйте ещё раз.\n" + ex.getMessage());
+            return;
+        }
+
+        JOptionPane.showMessageDialog(this,
+                "Таблица скопирована в буфер обмена.\n"
+                        + "Переключитесь в Word и вставьте (Cmd+V) —\n"
+                        + "Word конвертирует HTML в обычную таблицу.\n\n"
+                        + "Колонок: " + table.columnCount()
+                        + ", строк данных: " + table.rows().size(),
+                "Готово", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void showError(String message) {
